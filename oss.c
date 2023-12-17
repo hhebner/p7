@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
         SysClock* shm_clock;
         int msgid;
         Message msg;
-if ((shmid = shmget(key, sizeof(SysClock), IPC_CREAT | 0666)) < 0) {
+        if ((shmid = shmget(key, sizeof(SysClock), IPC_CREAT | 0666)) < 0) {
                 perror("shmget failed");
                 exit(1);
         }
