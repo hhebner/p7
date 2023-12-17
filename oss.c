@@ -141,11 +141,6 @@ int main(int argc, char* argv[]) {
                         break;
                 }
         }
-printf("-n value = %d\n", n);
-        printf("-s value = %d\n", s);
-        printf("-t value = %d\n", t);
-        printf("-f value = %s\n", f);
-
         key_t key = 290161;
         int shmid;
         SysClock* shm_clock;
@@ -173,7 +168,14 @@ printf("-n value = %d\n", n);
 
         shm_clock->seconds = 0;
         shm_clock->nano_seconds = 0;
- int total_workers_launched = 0;
+
+        FILE *log_file = fopen(f, "w");
+        if (log_file == NULL) {
+                perror("Could not open file");
+                exit(1);
+        }
+
+        int total_workers_launched = 0;
         int active_workers = 0;
         for (int i = 0; i < n; i++) {
                 unsigned int termTimeS = rand() % t + 1;
@@ -195,7 +197,9 @@ printf("-n value = %d\n", n);
                         exit(1);
                 }
         }
-active_workers = n;
+
+        active_workers = n;
+        unsigned int last_half_second = 0;
         while(active_workers > 0) {
 
                 if (timeout){
@@ -208,19 +212,31 @@ active_workers = n;
                 }
 
                 incrementClock(shm_clock, 0, 50000000);
+
+                if ((shm_clock->nano_seconds - last_half_second >= 500000000) ||(shm_clock->nano_seconds < last_half_second)) {
+                        fprintf(log_file, "OSS PID:%d SysClockS: %u SysclockNano: %u\nProcess Table:\n", getpid(), shm_clock->seconds, shm_clock->nano_seconds);
+                        for (int i = 0; i < 20; i++) {
+                                fprintf(log_file, "Entry %d Occupied %d PID %d StartS %d StartN %d\n", i, pcb[i].occupied, pcb[i].pid, pcb[i].start_seconds, pcb[i].start_nano);
+                        }
+                        last_half_second = shm_clock->nano_seconds;
+                }
                 for (int i = 0; i < n; i++) {
                         if (pcb[i].occupied) {
                                 Message msg;
                                 msg.mtype = pcb[i].pid;
-                                sprintf(msg.mtext, "Update from OSS at time %u:%u", shm_clock->seconds, shm_clock->nano_seconds);
+                                //sprintf(msg.mtext, Update from OSS at time %u:%u, shm_clock->seconds, shm_clock->nano_seconds);
                                 if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
                                         perror("msgsnd failed");
 
+                                } else {
+                                        fprintf(log_file, "OSS: Sending message to worker %d PID %d at time %u:%u\n",i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
+                                        printf("OSS: Sending message to worker %d PID %d at time %u:%u\n",i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
                                 }
 
 
                                 if (msgrcv(msgid, &msg, sizeof(msg.mtext), pcb[i].pid, IPC_NOWAIT) != -1) {
-                                        printf("Received from worker %d: %s\n", i, msg.mtext);
+                                        fprintf(log_file, "OSS: Receiving message from worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
+                                        printf("OSS: Receiving message from worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
                                         if (strcmp(msg.mtext, "0") == 0) {
                                                 pcb[i].occupied = 0;
                                                 active_workers--;
@@ -243,8 +259,13 @@ active_workers = n;
                 active_workers--;
         }
 
+        fclose(log_file);
+
         cleanup(shmid, shm_clock, msgid);
 
         return 0;
 }
+
+
+
 

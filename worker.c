@@ -47,41 +47,46 @@ int main(int argc, char *argv[]) {
                 perror("Message queue failed to create");
                 exit(1);
         }
-while (1) {
+
+    unsigned int lastSecondReported = 0;
+
+    while (1) {
         Message msg;
         if (msgrcv(msgid, &msg, sizeof(msg.mtext), getpid(), 0) == -1) {
-            perror("msgrcv failed");
-
+                perror("msgrcv failed");
         }
 
-        printf("WORKER PID:%d PPID:%d Received message -- SysClockS: %u SysclockNano: %u TermTimeS: %u TermTimeNano: %u\n", getpid(), getppid(), shm_clock->seconds, shm_clock->nano_seconds, termTimeS, termTimeNano);
+        if (shm_clock->seconds != lastSecondReported) {
+                printf("WORKER PID:%d PPID:%d SysClockS: %u SysclockNano: %u TermTimeS: %u TermTimeNano: %u\n",
+                getpid(), getppid(), shm_clock->seconds, shm_clock->nano_seconds, termTimeS, termTimeNano);
+                printf("--%u seconds have passed since starting\n", shm_clock->seconds - lastSecondReported);
+                lastSecondReported = shm_clock->seconds;
+        }
 
-        if (shm_clock->seconds > termTimeS ||
-            (shm_clock->seconds == termTimeS && shm_clock->nano_seconds >= termTimeNano)) {
-
-            strcpy(msg.mtext, "0");
-            msg.mtype = getpid();
-            if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-                perror("msgsnd failed");
-                return 1;
-            }
-            break;
+        if (shm_clock->seconds > termTimeS || (shm_clock->seconds == termTimeS && shm_clock->nano_seconds >= termTimeNano)) {
+                strcpy(msg.mtext, "0");
+                msg.mtype = getpid();
+                if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                        perror("msgsnd failed");
+                        return 1;
+                }
+                break;
         } else {
-
-            strcpy(msg.mtext, "1");
-            msg.mtype = getpid();
-            if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-                perror("msgsnd failed");
-                return 1;
-            }
+                strcpy(msg.mtext, "1");
+                msg.mtype = getpid();
+                if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                        perror("msgsnd failed");
+                        return 1;
+                }
         }
     }
 
     printf("WORKER PID:%d Terminating\n", getpid());
 
-  
     shmdt(shm_clock);
     return 0;
 }
+
+
 
 
