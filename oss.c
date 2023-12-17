@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 typedef struct PCB {
         int occupied;
@@ -67,6 +68,17 @@ int allocatePCB() {
         return -1;
 }
 
+void updatePCBOnTermination(pid_t pid) {
+    for (int i = 0; i < 20; i++) {
+        if (pcb[i].pid == pid) {
+            pcb[i].occupied = 0;
+            pcb[i].pid = 0;
+            pcb[i].start_seconds = 0;
+            pcb[i].start_nano = 0;
+        }
+    }
+}
+
 void printSysClock(SysClock *clock) {
     printf("Clock time: %u seconds and %u nanoseconds\n", clock->seconds, clock->nano_seconds);
 }
@@ -84,6 +96,19 @@ void cleanup(int shmid, SysClock *shm_clock, int msgid) {
         msgctl(msgid, IPC_RMID, NULL);
     }
 }
+int timeout = 0;
+
+void handler(int sig){
+    if (sig == SIGALRM){
+        printf("Terminating becasue 1 minute has passed\n");
+        timeout = 1;
+    } else if (sig == SIGINT) {
+        printf("Terminating becasue ctrl-c was pressed\n");
+        timeout = 1;
+    }
+}
+
+
 int main(int argc, char* argv[]) {
         int opt;
         int n = 1;
@@ -116,9 +141,7 @@ int main(int argc, char* argv[]) {
                         break;
                 }
         }
-
-
-        printf("-n value = %d\n", n);
+printf("-n value = %d\n", n);
         printf("-s value = %d\n", s);
         printf("-t value = %d\n", t);
         printf("-f value = %s\n", f);
@@ -128,7 +151,6 @@ int main(int argc, char* argv[]) {
         SysClock* shm_clock;
         key_t msg_key = 15436;
         int msgid;
-        Message msg;
 
         if ((shmid = shmget(key, sizeof(SysClock), IPC_CREAT | 0666)) < 0) {
                 perror("shmget failed");
@@ -140,43 +162,89 @@ int main(int argc, char* argv[]) {
                 exit(1);
         }
 
-        if ((msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT)) == -1) {
+        if ((msgid = msgget(msg_key, 0666 | IPC_CREAT)) == -1) {
                 perror("Message queue failed to create");
-                exit(EXIT_FAILURE);
+                exit(1);
         }
 
-        shm_clock->seconds = 5;
-        shm_clock->nano_seconds = 2000000;
+        signal(SIGALRM, handler);
+        signal(SIGINT, handler);
+        alarm(60);
 
-        pid_t pid;
-        int total_workers_launched = 0;
+        shm_clock->seconds = 0;
+        shm_clock->nano_seconds = 0;
+ int total_workers_launched = 0;
         int active_workers = 0;
+        for (int i = 0; i < n; i++) {
+                unsigned int termTimeS = rand() % t + 1;
+                unsigned int termTimeNano = rand() % 1000000000;
 
-        pid = fork();
-        if (pid == 0) {
-                execlp("./worker", "worker", NULL);
-                perror("execlp failed");
-                exit(EXIT_FAILURE);
-        } else if (pid < 0) {
+                char termTimeSStr[10], termTimeNanoStr[10];
+                sprintf(termTimeSStr, "%u", termTimeS);
+                sprintf(termTimeNanoStr, "%u", termTimeNano);
+                pid_t pid = fork();
+                if (pid == 0) {
+                        execlp("./worker", "worker", termTimeSStr, termTimeNanoStr, (char *) NULL);
+                        perror("execlp failed");
+                        exit(1);
+                }else if (pid > 0) {
+                        update_PCB(pid, &shm_clock->seconds, &shm_clock->nano_seconds);
+                } else {
 
-                perror("fork failed");
-                exit(EXIT_FAILURE);
-    }
-        msg.mtype = 1;
-        strcpy(msg.mtext, "Hello from OSS");
-        if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-                perror("msgsnd failed");
-                exit(EXIT_FAILURE);
+                        perror("fork failed");
+                        exit(1);
+                }
+        }
+active_workers = n;
+        while(active_workers > 0) {
+
+                if (timeout){
+                        for (int i = 0; i < 20; i++){
+                                if (pcb[i].occupied){
+                                        kill(pcb[i].pid, SIGTERM);
+                                }
+                        }
+                        cleanup(shmid, shm_clock, msgid);
+                }
+
+                incrementClock(shm_clock, 0, 50000000);
+                for (int i = 0; i < n; i++) {
+                        if (pcb[i].occupied) {
+                                Message msg;
+                                msg.mtype = pcb[i].pid;
+                                sprintf(msg.mtext, "Update from OSS at time %u:%u", shm_clock->seconds, shm_clock->nano_seconds);
+                                if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                                        perror("msgsnd failed");
+
+                                }
+
+
+                                if (msgrcv(msgid, &msg, sizeof(msg.mtext), pcb[i].pid, IPC_NOWAIT) != -1) {
+                                        printf("Received from worker %d: %s\n", i, msg.mtext);
+                                        if (strcmp(msg.mtext, "0") == 0) {
+                                                pcb[i].occupied = 0;
+                                                active_workers--;
+                                        }
+
+                                }
+                                usleep(100000);
+                        }
+                }
         }
 
-        if (msgrcv(msgid, &msg, sizeof(msg.mtext), 2, 0) == -1) {
-                perror("msgrcv failed");
-                exit(EXIT_FAILURE);
+        int status;
+        pid_t child_pid;
+        while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
+
+                printf("Worker with PID %d terminated\n", child_pid);
+
+                updatePCBOnTermination(child_pid);
+
+                active_workers--;
         }
-        printf("Received from worker: %s\n", msg.mtext);
-        wait(NULL);
 
         cleanup(shmid, shm_clock, msgid);
 
         return 0;
 }
+

@@ -5,6 +5,7 @@
 #include <sys/msg.h>
 #include <sys/shm.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 
 typedef struct {
@@ -17,7 +18,14 @@ typedef struct {
     char mtext[100];
 } Message;
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s <termTimeS> <termTimeNano>\n", argv[0]);
+        return 1;
+    }
+
+    unsigned int termTimeS = atoi(argv[1]);
+    unsigned int termTimeNano = atoi(argv[2]);
 
     key_t key = 290161;
     int shmid;
@@ -37,27 +45,43 @@ int main() {
         }
     if ((msgid = msgget(msg_key, 0666)) == -1) {
                 perror("Message queue failed to create");
-                exit(EXIT_FAILURE);
+                exit(1);
+        }
+while (1) {
+        Message msg;
+        if (msgrcv(msgid, &msg, sizeof(msg.mtext), getpid(), 0) == -1) {
+            perror("msgrcv failed");
+
         }
 
+        printf("WORKER PID:%d PPID:%d Received message -- SysClockS: %u SysclockNano: %u TermTimeS: %u TermTimeNano: %u\n", getpid(), getppid(), shm_clock->seconds, shm_clock->nano_seconds, termTimeS, termTimeNano);
 
-    if (msgrcv(msgid, &msg, sizeof(msg.mtext), 1, 0) == -1) {
-        perror("msgrcv failed");
-        exit(EXIT_FAILURE);
+        if (shm_clock->seconds > termTimeS ||
+            (shm_clock->seconds == termTimeS && shm_clock->nano_seconds >= termTimeNano)) {
+
+            strcpy(msg.mtext, "0");
+            msg.mtype = getpid();
+            if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                perror("msgsnd failed");
+                return 1;
+            }
+            break;
+        } else {
+
+            strcpy(msg.mtext, "1");
+            msg.mtype = getpid();
+            if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                perror("msgsnd failed");
+                return 1;
+            }
+        }
     }
-    printf("Received from OSS: %s\n", msg.mtext);
-    
-    msg.mtype = 2; 
-    strcpy(msg.mtext, "Acknowledgement from Worker");
-    if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-        perror("msgsnd failed");
-        exit(EXIT_FAILURE);
-    }
 
-    printf("Worker: Current Clock Time = %u seconds, %u nanoseconds\n", shm_clock->seconds, shm_clock->nano_seconds);
+    printf("WORKER PID:%d Terminating\n", getpid());
 
-    
+  
     shmdt(shm_clock);
     return 0;
 }
+
 
