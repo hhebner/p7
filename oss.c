@@ -143,7 +143,7 @@ if ((shmid = shmget(key, sizeof(SysClock), IPC_CREAT | 0666)) < 0) {
                 exit(EXIT_FAILURE);
         }
 
-        shm_clock->seconds = 3;
+        shm_clock->seconds = 5;
         shm_clock->nano_seconds = 2000000;
 
         pid_t pid;

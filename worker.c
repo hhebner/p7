@@ -25,8 +25,7 @@ int main() {
                 exit(1);
         }
 
-
-    printf("Worker: Current Clock Time = %u seconds, %u nanoseconds\n", shm_clock->seconds, shm_clock->nano_seconds);
+    printf("Worker: current Clock Time = %u seconds, %u nanoseconds\n", shm_clock->seconds, shm_clock->nano_seconds);
 
     shmdt(shm_clock);
     return 0;
