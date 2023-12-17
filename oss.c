@@ -126,8 +126,10 @@ int main(int argc, char* argv[]) {
         key_t key = 290161;
         int shmid;
         SysClock* shm_clock;
+        key_t msg_key = 15436;
         int msgid;
         Message msg;
+
         if ((shmid = shmget(key, sizeof(SysClock), IPC_CREAT | 0666)) < 0) {
                 perror("shmget failed");
                 exit(1);
@@ -160,8 +162,19 @@ int main(int argc, char* argv[]) {
                 perror("fork failed");
                 exit(EXIT_FAILURE);
     }
-        wait(NULL);
+        msg.mtype = 1;
+        strcpy(msg.mtext, "Hello from OSS");
+        if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                perror("msgsnd failed");
+                exit(EXIT_FAILURE);
+        }
 
+        if (msgrcv(msgid, &msg, sizeof(msg.mtext), 2, 0) == -1) {
+                perror("msgrcv failed");
+                exit(EXIT_FAILURE);
+        }
+        printf("Received from worker: %s\n", msg.mtext);
+        wait(NULL);
 
         cleanup(shmid, shm_clock, msgid);
 
