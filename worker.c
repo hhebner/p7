@@ -50,35 +50,43 @@ int main(int argc, char *argv[]) {
 
     unsigned int lastSecondReported = 0;
 
+     printf("WORKER PID:%d PPID:%d Called with oss: TermTimeS: %u TermTimeNano: %u\n--Received message\n",
+       getpid(), getppid(), termTimeS, termTimeNano);
+
     while (1) {
         Message msg;
-        if (msgrcv(msgid, &msg, sizeof(msg.mtext), getpid(), 0) == -1) {
+        if (msgrcv(msgid, &msg, sizeof(msg.mtext), 1, 0) == -1) {
                 perror("msgrcv failed");
         }
 
         if (shm_clock->seconds != lastSecondReported) {
-                printf("WORKER PID:%d PPID:%d SysClockS: %u SysclockNano: %u TermTimeS: %u TermTimeNano: %u\n",
-                getpid(), getppid(), shm_clock->seconds, shm_clock->nano_seconds, termTimeS, termTimeNano);
+                printf("WORKER PID:%d PPID:%d SysClockS: %u SysclockNano: %u TermTimeS: %u TermTimeNano: %u\n",getpid(), getppid(), shm_clock->seconds, shm_clock->nano_seconds, termTimeS, termTimeNano);
                 printf("--%u seconds have passed since starting\n", shm_clock->seconds - lastSecondReported);
                 lastSecondReported = shm_clock->seconds;
-        }
+                }
+
 
         if (shm_clock->seconds > termTimeS || (shm_clock->seconds == termTimeS && shm_clock->nano_seconds >= termTimeNano)) {
-                strcpy(msg.mtext, "0");
-                msg.mtype = getpid();
-                if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-                        perror("msgsnd failed");
-                        return 1;
-                }
-                break;
+            // Time to terminate
+            strcpy(msg.mtext, "0");
         } else {
-                strcpy(msg.mtext, "1");
-                msg.mtype = getpid();
-                if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-                        perror("msgsnd failed");
-                        return 1;
-                }
+            // Still working
+            strcpy(msg.mtext, "1");
         }
+
+    // Send status message to oss
+        msg.mtype = 2; // Set to a common type that oss expects
+        if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+            perror("msgsnd failed");
+            return 1;
+        }
+
+    // Check if it's time to terminate
+        if (strcmp(msg.mtext, "0") == 0) {
+            break;
+        }
+
+        usleep(100000);
     }
 
     printf("WORKER PID:%d Terminating\n", getpid());
@@ -86,7 +94,6 @@ int main(int argc, char *argv[]) {
     shmdt(shm_clock);
     return 0;
 }
-
 
 
 

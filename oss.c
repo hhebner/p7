@@ -177,87 +177,103 @@ int main(int argc, char* argv[]) {
 
         int total_workers_launched = 0;
         int active_workers = 0;
-        for (int i = 0; i < n; i++) {
+
+        unsigned int last_half_second = 0;
+        while(active_workers > 0 || total_workers_launched < n) {
+             if (active_workers < s && total_workers_launched < n) {
                 unsigned int termTimeS = rand() % t + 1;
                 unsigned int termTimeNano = rand() % 1000000000;
 
                 char termTimeSStr[10], termTimeNanoStr[10];
                 sprintf(termTimeSStr, "%u", termTimeS);
                 sprintf(termTimeNanoStr, "%u", termTimeNano);
+
                 pid_t pid = fork();
                 if (pid == 0) {
-                        execlp("./worker", "worker", termTimeSStr, termTimeNanoStr, (char *) NULL);
-                        perror("execlp failed");
-                        exit(1);
-                }else if (pid > 0) {
-                        update_PCB(pid, &shm_clock->seconds, &shm_clock->nano_seconds);
+           
+                    execlp("./worker", "worker", termTimeSStr, termTimeNanoStr, (char *) NULL);
+                    perror("execlp failed");
+                    exit(1);
+                } else if (pid > 0) {
+            
+                    update_PCB(pid, &shm_clock->seconds, &shm_clock->nano_seconds);
+                    active_workers++;
+                    total_workers_launched++;
                 } else {
-
-                        perror("fork failed");
-                        exit(1);
+                    perror("fork failed");
+                    exit(1);
                 }
+            }
+            if (timeout){
+                for (int i = 0; i < 20; i++){
+                    if (pcb[i].occupied){
+                        kill(pcb[i].pid, SIGTERM);
+                    }
+                }
+                cleanup(shmid, shm_clock, msgid);
+            }
+
+            incrementClock(shm_clock, 0, 50000000);
+
+            if ((shm_clock->nano_seconds - last_half_second >= 500000000) || (shm_clock->nano_seconds < last_half_second)) {
+
+                fprintf(log_file, "OSS PID:%d SysClockS: %u SysclockNano: %u\nProcess Table:\n", getpid(), shm_clock->seconds, shm_clock->nano_seconds);
+
+                printf("OSS PID:%d SysClockS: %u SysclockNano: %u\nProcess Table:\n", getpid(), shm_clock->seconds, shm_clock->nano_seconds);
+
+            for (int i = 0; i < 20; i++) {
+                fprintf(log_file, "Entry %d Occupied %d PID %d StartS %d StartN %d\n", i, pcb[i].occupied, pcb[i].pid, pcb[i].start_seconds, pcb[i].start_nano);
+
+                printf("Entry %d Occupied %d PID %d StartS %d StartN %d\n", i, pcb[i].occupied, pcb[i].pid, pcb[i].start_seconds, pcb[i].start_nano);
+                }
+                last_half_second = shm_clock->nano_seconds;
+        }
+            for (int i = 0; i < n; i++) {
+                    if (pcb[i].occupied) {
+                        Message msg;
+                        msg.mtype = 1;
+                        strcpy(msg.mtext, "Your message here");
+
+                        if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
+                                perror("msgsnd failed");
+                        } else {
+                                fprintf(log_file, "OSS: Sending message to worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
+                                printf("OSS: Sending message to worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
         }
 
-        active_workers = n;
-        unsigned int last_half_second = 0;
-        while(active_workers > 0) {
+                        if (msgrcv(msgid, &msg, sizeof(msg.mtext), 2, IPC_NOWAIT) != -1) {
+                                fprintf(log_file, "OSS: Receiving message from worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
+                                printf("OSS: Receiving message from worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
 
-                if (timeout){
-                        for (int i = 0; i < 20; i++){
-                                if (pcb[i].occupied){
-                                        kill(pcb[i].pid, SIGTERM);
+                        if (strcmp(msg.mtext, "0") == 0) {
+                                pcb[i].ready_terminate = 1;
                                 }
                         }
-                        cleanup(shmid, shm_clock, msgid);
-                }
-
-                incrementClock(shm_clock, 0, 50000000);
-
-                if ((shm_clock->nano_seconds - last_half_second >= 500000000) ||(shm_clock->nano_seconds < last_half_second)) {
-                        fprintf(log_file, "OSS PID:%d SysClockS: %u SysclockNano: %u\nProcess Table:\n", getpid(), shm_clock->seconds, shm_clock->nano_seconds);
-                        for (int i = 0; i < 20; i++) {
-                                fprintf(log_file, "Entry %d Occupied %d PID %d StartS %d StartN %d\n", i, pcb[i].occupied, pcb[i].pid, pcb[i].start_seconds, pcb[i].start_nano);
-                        }
-                        last_half_second = shm_clock->nano_seconds;
-                }
-                for (int i = 0; i < n; i++) {
-                        if (pcb[i].occupied) {
-                                Message msg;
-                                msg.mtype = pcb[i].pid;
-                                //sprintf(msg.mtext, Update from OSS at time %u:%u, shm_clock->seconds, shm_clock->nano_seconds);
-                                if (msgsnd(msgid, &msg, sizeof(msg.mtext), 0) == -1) {
-                                        perror("msgsnd failed");
-
-                                } else {
-                                        fprintf(log_file, "OSS: Sending message to worker %d PID %d at time %u:%u\n",i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
-                                        printf("OSS: Sending message to worker %d PID %d at time %u:%u\n",i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
-                                }
-
-
-                                if (msgrcv(msgid, &msg, sizeof(msg.mtext), pcb[i].pid, IPC_NOWAIT) != -1) {
-                                        fprintf(log_file, "OSS: Receiving message from worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
-                                        printf("OSS: Receiving message from worker %d PID %d at time %u:%u\n", i, pcb[i].pid, shm_clock->seconds, shm_clock->nano_seconds);
-                                        if (strcmp(msg.mtext, "0") == 0) {
-                                                pcb[i].occupied = 0;
-                                                active_workers--;
-                                        }
-
-                                }
-                                usleep(100000);
-                        }
+                        usleep(100000);
                 }
         }
-
-        int status;
-        pid_t child_pid;
-        while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
+            int status;
+            pid_t child_pid;
+            while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
 
                 printf("Worker with PID %d terminated\n", child_pid);
 
-                updatePCBOnTermination(child_pid);
-
-                active_workers--;
+                for (int i = 0; i < n; i++) {
+                        if (pcb[i].pid == child_pid) {
+                        // Found the matching PCB entry
+                                if (pcb[i].ready_terminate = 1) {
+                                        pcb[i].occupied = 0;
+                                        pcb[i].ready_terminate = 0; // Reset the flag
+                                        active_workers--;
+                                        break; // Exit the loop as we found the matching entry
+            }
         }
+    }
+  }
+
+            usleep(100000);
+        }
+
 
         fclose(log_file);
 
