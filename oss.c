@@ -29,13 +29,7 @@ typedef struct {
         unsigned int nano_seconds;
 } SysClock;
 
-void print_PCB(int *seconds_ptr, int *nano_ptr) {
-    printf("OSS PID:%d SysClockS: %d SysclockNano: %d\n", getpid(), *seconds_ptr, *nano_ptr);
-    printf("Process Table:\nEntry Occupied PID StartS StartN\n");
-    for (int i = 0; i < 20; i++) {
-        printf("%d %d %d %d %d\n", i, pcb[i].occupied, pcb[i].pid, pcb[i].start_seconds, pcb[i].start_nano);
-    }
-}
+
 
 void update_PCB(pid_t pid, int *seconds_ptr, int *nano_ptr) {
     for (int i = 0; i < 20; i++) {
@@ -58,30 +52,7 @@ void incrementClock(SysClock* clock, unsigned int seconds, unsigned int nano_sec
         clock->seconds += seconds;
 }
 
-int allocatePCB() {
-        for (int i = 0; i < 20; i++) {
-                if (pcb[i].occupied == 0) {
-                        pcb[i].occupied = 1;
-                        return i;
-                }
-        }
-        return -1;
-}
 
-void updatePCBOnTermination(pid_t pid) {
-    for (int i = 0; i < 20; i++) {
-        if (pcb[i].pid == pid) {
-            pcb[i].occupied = 0;
-            pcb[i].pid = 0;
-            pcb[i].start_seconds = 0;
-            pcb[i].start_nano = 0;
-        }
-    }
-}
-
-void printSysClock(SysClock *clock) {
-    printf("Clock time: %u seconds and %u nanoseconds\n", clock->seconds, clock->nano_seconds);
-}
 
 void cleanup(int shmid, SysClock *shm_clock, int msgid) {
     if (shm_clock != NULL) {
@@ -260,12 +231,12 @@ int main(int argc, char* argv[]) {
 
                 for (int i = 0; i < n; i++) {
                         if (pcb[i].pid == child_pid) {
-                        // Found the matching PCB entry
+                      
                                 if (pcb[i].ready_terminate = 1) {
                                         pcb[i].occupied = 0;
-                                        pcb[i].ready_terminate = 0; // Reset the flag
+                                        pcb[i].ready_terminate = 0; 
                                         active_workers--;
-                                        break; // Exit the loop as we found the matching entry
+                                        break; 
             }
         }
     }
